@@ -1,0 +1,4 @@
+<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Builder; use Illuminate\Database\Eloquent\Model; use Illuminate\Database\Eloquent\Relations\BelongsTo; use Illuminate\Database\Eloquent\SoftDeletes;
+class EmployeeContract extends Model { use SoftDeletes; protected $fillable=['employee_id','contract_number','type','start_date','end_date','probation_end_date','notice_days','status','signed_at','created_by','notes']; protected $casts=['start_date'=>'date','end_date'=>'date','probation_end_date'=>'date','signed_at'=>'datetime']; public function employee():BelongsTo{return $this->belongsTo(Employee::class);} public function creator():BelongsTo{return $this->belongsTo(User::class,'created_by');} public function scopeExpiringBetween(Builder $q,$from,$to):Builder{return $q->where('status','active')->whereNotNull('end_date')->whereBetween('end_date',[$from,$to]);} }
