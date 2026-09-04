@@ -37,6 +37,11 @@ class Employee extends Model
         return $this->hasMany(EmployeeEarning::class);
     }
 
+    public function deductions(): HasMany
+    {
+        return $this->hasMany(EmployeeDeduction::class);
+    }
+
     public function leaveBalances(): HasMany
     {
         return $this->hasMany(LeaveBalance::class);

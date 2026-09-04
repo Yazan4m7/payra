@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\ComplianceSetting;
 use App\Models\Employee;
+use App\Models\EmployeeDeduction;
 use App\Models\EmployeeEarning;
 use App\Models\OvertimeEntry;
 use App\Support\Money;
@@ -34,11 +35,19 @@ class PayrollEngine
 
         $baseSalary = Money::d($employee->salary);
         $earningCalculation = $this->earningsForPeriod($employee, $periodStart, $periodEnd);
+        $deductionCalculation = $this->deductionsForPeriod($employee, $periodStart, $periodEnd);
         $earnings = $earningCalculation['total'];
         $taxableEarnings = $earningCalculation['taxable'];
         $sscEarnings = $earningCalculation['ssc_applicable'];
+        $deductions = $deductionCalculation['total'];
 
-        $sscBasePay = $baseSalary->plus($sscEarnings);
+        $sscBasePay = $baseSalary
+            ->plus($sscEarnings)
+            ->minus($deductionCalculation['ssc_base_reduction']);
+        if ($sscBasePay->isLessThan(0)) {
+            $sscBasePay = BigDecimal::zero();
+        }
+
         $ssc = $this->ssc->calculate($sscBasePay, $employee->ssc_enrollment_date, $settings);
         $overtimeCalculation = $this->overtimePay($employee, $month, $year, $baseSalary);
         $overtime = $overtimeCalculation['total'];
@@ -46,7 +55,8 @@ class PayrollEngine
         $monthlyTaxable = $baseSalary
             ->plus($overtime)
             ->plus($taxableEarnings)
-            ->minus($ssc['employee']);
+            ->minus($ssc['employee'])
+            ->minus($deductionCalculation['taxable_reduction']);
         if ($monthlyTaxable->isLessThan(0)) {
             $monthlyTaxable = BigDecimal::zero();
         }
@@ -77,6 +87,7 @@ class PayrollEngine
         $net = $baseSalary
             ->plus($overtime)
             ->plus($earnings)
+            ->minus($deductions)
             ->minus($ssc['employee'])
             ->minus($incomeTax)
             ->minus($monthlySurcharge);
@@ -85,6 +96,7 @@ class PayrollEngine
             'gross_salary' => Money::round($baseSalary),
             'overtime_pay' => Money::round($overtime),
             'earnings_total' => Money::round($earnings),
+            'deductions_total' => Money::round($deductions),
             'ssc_employee' => Money::round($ssc['employee']),
             'ssc_employer' => Money::round($ssc['employer']),
             'income_tax' => Money::round($incomeTax),
@@ -98,6 +110,8 @@ class PayrollEngine
                 'base_salary' => Money::round($baseSalary),
                 'earnings_total' => Money::round($earnings),
                 'earnings_details' => $earningCalculation['details'],
+                'deductions_total' => Money::round($deductions),
+                'deduction_details' => $deductionCalculation['details'],
                 'ssc_ceiling_used' => Money::round($ssc['ceiling']),
                 'ssc_base' => Money::round($ssc['base']),
                 'pre_cutoff_enrollment' => $ssc['pre_cutoff'],
@@ -148,6 +162,50 @@ class PayrollEngine
             'total' => $total,
             'taxable' => $taxable,
             'ssc_applicable' => $sscApplicable,
+            'details' => $details,
+        ];
+    }
+
+    private function deductionsForPeriod(Employee $employee, Carbon $periodStart, Carbon $periodEnd): array
+    {
+        $rows = EmployeeDeduction::query()
+            ->where('employee_id', $employee->id)
+            ->applicableTo($periodStart, $periodEnd)
+            ->orderBy('category')
+            ->orderBy('id')
+            ->get();
+
+        $total = BigDecimal::zero();
+        $taxableReduction = BigDecimal::zero();
+        $sscBaseReduction = BigDecimal::zero();
+        $details = [];
+
+        foreach ($rows as $deduction) {
+            $amount = Money::d($deduction->amount);
+            $total = $total->plus($amount);
+
+            if ($deduction->reduces_taxable_income) {
+                $taxableReduction = $taxableReduction->plus($amount);
+            }
+            if ($deduction->reduces_ssc_base) {
+                $sscBaseReduction = $sscBaseReduction->plus($amount);
+            }
+
+            $details[] = [
+                'deduction_id' => $deduction->id,
+                'category' => $deduction->category,
+                'name' => $deduction->name,
+                'amount_jod' => Money::round($amount),
+                'reduces_taxable_income' => $deduction->reduces_taxable_income,
+                'reduces_ssc_base' => $deduction->reduces_ssc_base,
+                'recurring' => $deduction->recurring,
+            ];
+        }
+
+        return [
+            'total' => $total,
+            'taxable_reduction' => $taxableReduction,
+            'ssc_base_reduction' => $sscBaseReduction,
             'details' => $details,
         ];
     }

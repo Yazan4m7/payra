@@ -7,6 +7,7 @@ use App\Http\Controllers\TenantAuthController;
 use App\Livewire\Company\Settings as CompanySettings;
 use App\Livewire\Compliance\Settings as ComplianceSettings;
 use App\Livewire\Dashboard;
+use App\Livewire\Deductions\Index as DeductionsIndex;
 use App\Livewire\Earnings\Index as EarningsIndex;
 use App\Livewire\Employees\Index as EmployeesIndex;
 use App\Livewire\Holidays\Index as HolidaysIndex;
@@ -38,6 +39,7 @@ Route::middleware(['web', InitializeTenancyByDomain::class, PreventAccessFromCen
             Route::get('/', Dashboard::class)->name('dashboard');
             Route::get('/employees', EmployeesIndex::class)->name('employees.index');
             Route::get('/earnings', EarningsIndex::class)->name('earnings.index');
+            Route::get('/deductions', DeductionsIndex::class)->name('deductions.index');
             Route::get('/payroll', PayrollRuns::class)->name('payroll.runs');
             Route::get('/leave', LeaveRequests::class)->name('leave.requests');
             Route::get('/overtime', OvertimeEntries::class)->name('overtime.entries');

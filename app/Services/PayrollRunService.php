@@ -59,6 +59,7 @@ class PayrollRunService
                             'gross_salary' => $calculation['gross_salary'],
                             'overtime_pay' => $calculation['overtime_pay'],
                             'earnings_total' => $calculation['earnings_total'],
+                            'deductions_total' => $calculation['deductions_total'],
                             'ssc_employee' => $calculation['ssc_employee'],
                             'ssc_employer' => $calculation['ssc_employer'],
                             'income_tax' => $calculation['income_tax'],
