@@ -1,8 +1,4 @@
 <?php
 namespace App\Providers;
-use App\Models\AuditLog; use App\Services\AuditService; use Illuminate\Database\Eloquent\Model; use Illuminate\Support\Facades\Event; use Illuminate\Support\ServiceProvider;
-class AppServiceProvider extends ServiceProvider
-{
-public function register():void{}
-public function boot():void{Event::listen('eloquent.*',function(string $event,array $payload){$model=$payload[0]??null;if(!$model instanceof Model||$model instanceof AuditLog)return;if(!preg_match('/^eloquent\.(created|updated|deleted|restored): /',$event,$m))return;$action=$m[1];$before=null;$after=null;if($action==='created')$after=$model->getAttributes();elseif($action==='updated'){ $changes=$model->getChanges();$after=$changes;$before=[];foreach(array_keys($changes) as $key)$before[$key]=$model->getRawOriginal($key);}elseif($action==='deleted')$before=$model->getAttributes();elseif($action==='restored')$after=$model->getAttributes();app(AuditService::class)->record($action,$model,$before,$after);});}
-}
+use App\Models\AuditLog; use App\Models\PayrollRun; use App\Observers\PayrollRunObserver; use App\Services\AuditService; use Illuminate\Database\Eloquent\Model; use Illuminate\Support\Facades\Event; use Illuminate\Support\ServiceProvider;
+class AppServiceProvider extends ServiceProvider { public function register():void{} public function boot():void{PayrollRun::observe(PayrollRunObserver::class);Event::listen('eloquent.*',function(string $event,array $payload){$model=$payload[0]??null;if(!$model instanceof Model||$model instanceof AuditLog)return;if(!preg_match('/^eloquent\.(created|updated|deleted|restored): /',$event,$m))return;$action=$m[1];$before=null;$after=null;if($action==='created')$after=$model->getAttributes();elseif($action==='updated'){$changes=$model->getChanges();$after=$changes;$before=[];foreach(array_keys($changes) as $key)$before[$key]=$model->getRawOriginal($key);}elseif($action==='deleted')$before=$model->getAttributes();elseif($action==='restored')$after=$model->getAttributes();app(AuditService::class)->record($action,$model,$before,$after);});} }
