@@ -1,0 +1,20 @@
+<div>
+<div class="card mb-4"><div class="card-header fw-semibold">{{ __('payroll.adjustments') }}</div><div class="card-body">
+<form wire:submit="save" class="row g-3">
+<div class="col-md-3"><label class="form-label">{{ __('hr.employee') }}</label><select class="form-select" wire:model="form.employee_id"><option value="">—</option>@foreach($employees as $e)<option value="{{ $e->id }}">{{ $e->name }}</option>@endforeach</select></div>
+<div class="col-md-2"><label class="form-label">{{ __('hr.type') }}</label><select class="form-select" wire:model.live="form.kind"><option value="earning">{{ __('payroll.adjustment_earning') }}</option><option value="deduction">{{ __('payroll.adjustment_deduction') }}</option></select></div>
+<div class="col-md-3"><label class="form-label">{{ __('hr.name') }}</label><input class="form-control" wire:model="form.name"></div>
+<div class="col-md-2"><label class="form-label">{{ __('payroll.amount_jod') }}</label><input class="form-control" wire:model="form.amount"></div>
+<div class="col-md-1"><label class="form-label">{{ __('hr.month') }}</label><input type="number" min="1" max="12" class="form-control" wire:model="form.payment_month"></div>
+<div class="col-md-1"><label class="form-label">{{ __('hr.year') }}</label><input type="number" class="form-control" wire:model="form.payment_year"></div>
+<div class="col-md-2"><label class="form-label">{{ __('payroll.source_month') }}</label><input type="number" min="1" max="12" class="form-control" wire:model="form.source_month"></div>
+<div class="col-md-2"><label class="form-label">{{ __('payroll.source_year') }}</label><input type="number" class="form-control" wire:model="form.source_year"></div>
+@if($form['kind']==='earning')<div class="col-md-4 d-flex align-items-end gap-3"><label><input type="checkbox" wire:model="form.taxable"> {{ __('payroll.taxable') }}</label><label><input type="checkbox" wire:model="form.ssc_applicable"> {{ __('payroll.ssc_applicable') }}</label></div>@else<div class="col-md-5 d-flex align-items-end gap-3"><label><input type="checkbox" wire:model="form.reduces_taxable_income"> {{ __('payroll.reduces_taxable_income') }}</label><label><input type="checkbox" wire:model="form.reduces_ssc_base"> {{ __('payroll.reduces_ssc_base') }}</label></div>@endif
+<div class="col-12"><label class="form-label">{{ __('hr.reason') }}</label><textarea class="form-control" wire:model="form.reason"></textarea></div>
+<div class="col-12"><button class="btn btn-primary">{{ __('hr.save') }}</button></div>
+</form>@error('adjustment')<div class="alert alert-danger mt-3">{{ $message }}</div>@enderror
+</div></div>
+<div class="card"><div class="table-responsive"><table class="table mb-0"><thead><tr><th>{{ __('hr.employee') }}</th><th>{{ __('hr.type') }}</th><th>{{ __('hr.name') }}</th><th>{{ __('payroll.amount_jod') }}</th><th>{{ __('payroll.pay_period') }}</th><th>{{ __('payroll.source_period') }}</th><th>{{ __('hr.status') }}</th><th></th></tr></thead><tbody>
+@forelse($rows as $r)<tr><td>{{ $r->employee->name }}</td><td>{{ __('payroll.adjustment_'.$r->kind) }}</td><td>{{ $r->name }}</td><td>{{ $r->amount }}</td><td>{{ sprintf('%02d/%04d',$r->payment_month,$r->payment_year) }}</td><td>{{ $r->source_month && $r->source_year ? sprintf('%02d/%04d',$r->source_month,$r->source_year) : '—' }}</td><td>{{ $r->status }}</td><td class="text-nowrap">@if($r->status==='pending')<button wire:click="approve({{ $r->id }})" class="btn btn-sm btn-success">{{ __('hr.approve') }}</button> <button wire:click="void({{ $r->id }})" class="btn btn-sm btn-outline-danger">{{ __('payroll.void') }}</button>@elseif($r->status==='approved')<button wire:click="void({{ $r->id }})" class="btn btn-sm btn-outline-danger">{{ __('payroll.void') }}</button>@endif</td></tr>@empty<tr><td colspan="8" class="text-center text-muted py-4">{{ __('hr.no_records') }}</td></tr>@endforelse
+</tbody></table></div></div>
+</div>
