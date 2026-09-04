@@ -34,7 +34,18 @@ class Runs extends Component
         $this->authorize('manage-hr');
         try {
             $service->process(PayrollRun::findOrFail($id));
-            session()->flash('success', __('hr.payroll_completed'));
+            session()->flash('success', 'Payroll calculated and is ready for approval.');
+        } catch (\RuntimeException $e) {
+            $this->addError('payroll', $e->getMessage());
+        }
+    }
+
+    public function approve(int $id, PayrollRunService $service): void
+    {
+        $this->authorize('manage-hr');
+        try {
+            $service->approve(PayrollRun::findOrFail($id), auth()->id());
+            session()->flash('success', 'Payroll approved and locked.');
         } catch (\RuntimeException $e) {
             $this->addError('payroll', $e->getMessage());
         }
@@ -43,7 +54,7 @@ class Runs extends Component
     public function render()
     {
         return view('livewire.payroll.runs', [
-            'runs' => PayrollRun::with(['payslips.employee', 'complianceSetting'])
+            'runs' => PayrollRun::with(['payslips.employee', 'complianceSetting', 'approver'])
                 ->withCount('payslips')
                 ->orderByDesc('year')
                 ->orderByDesc('month')
