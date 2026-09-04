@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - codex/heavy-tests-20260904
+  pull_request:
+    branches:
+      - main
 
 jobs:
   backend:
