@@ -1,0 +1,142 @@
+<?php
+
+namespace App\Services;
+
+use App\Models\ComplianceSetting;
+use App\Models\Employee;
+use App\Models\OvertimeEntry;
+use App\Support\Money;
+use Brick\Math\BigDecimal;
+use Brick\Math\RoundingMode;
+use Carbon\Carbon;
+use RuntimeException;
+
+class PayrollEngine
+{
+    public function __construct(
+        private ComplianceSettingsService $compliance,
+        private SscCalculator $ssc,
+        private ProgressiveTaxCalculator $taxCalculator,
+    ) {}
+
+    public function calculate(Employee $employee, int $month, int $year, ?ComplianceSetting $setting = null): array
+    {
+        $periodEnd = Carbon::create($year, $month, 1)->endOfMonth();
+        $record = $setting ?: $this->compliance->forDate($periodEnd);
+        $settings = $record->settings;
+        $this->compliance->require($settings, [
+            'ssc_employee_percent', 'ssc_employer_percent', 'ssc_enrollment_cutoff_date', 'ssc_ceiling_pre_cutoff_jod', 'ssc_ceiling_post_cutoff_jod',
+            'income_tax_brackets', 'personal_exemption_annual_jod', 'high_earner_surcharge_threshold_annual_jod', 'high_earner_surcharge_percent',
+            'overtime_multiplier_standard', 'overtime_multiplier_rest_holiday', 'monthly_hours_divisor',
+        ]);
+
+        $gross = Money::d($employee->salary);
+        $ssc = $this->ssc->calculate($gross, $employee->ssc_enrollment_date, $settings);
+        $overtimeCalculation = $this->overtimePay($employee, $month, $year, $gross);
+        $overtime = $overtimeCalculation['total'];
+
+        $monthlyTaxable = $gross->plus($overtime)->minus($ssc['employee']);
+        if ($monthlyTaxable->isLessThan(0)) {
+            $monthlyTaxable = BigDecimal::zero();
+        }
+
+        $annualIncome = $gross->plus($overtime)->multipliedBy('12');
+        $annualTaxable = $monthlyTaxable
+            ->multipliedBy('12')
+            ->minus((string) $settings['personal_exemption_annual_jod']);
+        if ($annualTaxable->isLessThan(0)) {
+            $annualTaxable = BigDecimal::zero();
+        }
+
+        $annualTax = $this->taxCalculator->calculate($annualTaxable, $settings['income_tax_brackets']);
+        $annualSurcharge = BigDecimal::zero();
+        $threshold = Money::d((string) $settings['high_earner_surcharge_threshold_annual_jod']);
+        if ($annualIncome->isGreaterThan($threshold)) {
+            $annualSurcharge = Money::percent(
+                $annualIncome->minus($threshold),
+                (string) $settings['high_earner_surcharge_percent']
+            );
+        }
+
+        $incomeTax = $annualTax->dividedBy('12', 12, RoundingMode::HALF_UP);
+        $monthlySurcharge = $annualSurcharge->dividedBy('12', 12, RoundingMode::HALF_UP);
+        $net = $gross->plus($overtime)->minus($ssc['employee'])->minus($incomeTax)->minus($monthlySurcharge);
+
+        return [
+            'gross_salary' => Money::round($gross),
+            'overtime_pay' => Money::round($overtime),
+            'ssc_employee' => Money::round($ssc['employee']),
+            'ssc_employer' => Money::round($ssc['employer']),
+            'income_tax' => Money::round($incomeTax),
+            'surcharge' => Money::round($monthlySurcharge),
+            'net_salary' => Money::round($net),
+            'compliance_setting_id' => $record->id,
+            'snapshot' => [
+                'setting_version' => $record->version_label,
+                'effective_date' => $record->effective_date->toDateString(),
+                'settings' => $settings,
+                'ssc_ceiling_used' => Money::round($ssc['ceiling']),
+                'ssc_base' => Money::round($ssc['base']),
+                'pre_cutoff_enrollment' => $ssc['pre_cutoff'],
+                'annual_income' => Money::round($annualIncome),
+                'annual_taxable' => Money::round($annualTaxable),
+                'overtime_details' => $overtimeCalculation['details'],
+            ],
+        ];
+    }
+
+    private function overtimePay(Employee $employee, int $month, int $year, BigDecimal $gross): array
+    {
+        $entries = OvertimeEntry::query()
+            ->where('employee_id', $employee->id)
+            ->where('status', 'approved')
+            ->whereYear('date', $year)
+            ->whereMonth('date', $month)
+            ->orderBy('date')
+            ->get();
+
+        $total = BigDecimal::zero();
+        $details = [];
+        $settingsCache = [];
+
+        foreach ($entries as $entry) {
+            $dateKey = $entry->date->toDateString();
+            if (! isset($settingsCache[$dateKey])) {
+                $record = $this->compliance->forDate($entry->date);
+                $this->compliance->require($record->settings, [
+                    'monthly_hours_divisor', 'overtime_multiplier_standard', 'overtime_multiplier_rest_holiday',
+                ]);
+                $settingsCache[$dateKey] = $record;
+            }
+
+            $record = $settingsCache[$dateKey];
+            $entrySettings = $record->settings;
+            $divisor = Money::d((string) $entrySettings['monthly_hours_divisor']);
+            if ($divisor->isZero() || $divisor->isNegative()) {
+                throw new RuntimeException('monthly_hours_divisor must be greater than zero.');
+            }
+
+            $hourly = $gross->dividedBy($divisor, 12, RoundingMode::HALF_UP);
+            $key = $entry->rate_type === 'rest_holiday'
+                ? 'overtime_multiplier_rest_holiday'
+                : 'overtime_multiplier_standard';
+            $multiplier = (string) $entrySettings[$key];
+            $pay = $hourly->multipliedBy((string) $entry->hours)->multipliedBy($multiplier);
+            $total = $total->plus($pay);
+
+            $details[] = [
+                'entry_id' => $entry->id,
+                'date' => $dateKey,
+                'hours' => (string) $entry->hours,
+                'rate_type' => $entry->rate_type,
+                'multiplier' => $multiplier,
+                'monthly_hours_divisor' => (string) $entrySettings['monthly_hours_divisor'],
+                'settings_version' => $record->version_label,
+                'amount_jod' => Money::round($pay),
+            ];
+        }
+
+        return ['total' => $total, 'details' => $details];
+    }
+
+}

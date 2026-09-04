@@ -1,0 +1,6 @@
+<?php
+use Illuminate\Database\Migrations\Migration; use Illuminate\Database\Schema\Blueprint; use Illuminate\Support\Facades\Schema;
+return new class extends Migration { public function up(): void {
+ Schema::create('payroll_runs', function(Blueprint $t){$t->id();$t->unsignedTinyInteger('month');$t->unsignedSmallInteger('year');$t->enum('status',['draft','processing','completed','void'])->default('draft');$t->foreignId('compliance_setting_id')->constrained()->restrictOnDelete();$t->foreignId('created_by')->nullable()->constrained('users')->nullOnDelete();$t->timestamp('completed_at')->nullable();$t->timestamps();$t->softDeletes();$t->unique(['month','year']);});
+ Schema::create('payslips', function(Blueprint $t){$t->id();$t->foreignId('payroll_run_id')->constrained()->cascadeOnDelete();$t->foreignId('employee_id')->constrained()->restrictOnDelete(); foreach(['gross_salary','overtime_pay','ssc_employee','ssc_employer','income_tax','surcharge','net_salary'] as $c) $t->decimal($c,16,3)->default(0);$t->json('calculation_snapshot');$t->timestamps();$t->softDeletes();$t->unique(['payroll_run_id','employee_id']);});
+ } public function down(): void {Schema::dropIfExists('payslips');Schema::dropIfExists('payroll_runs');} };

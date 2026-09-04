@@ -1,0 +1,53 @@
+<?php
+
+namespace App\Livewire\Payroll;
+
+use App\Models\PayrollRun;
+use App\Services\PayrollRunService;
+use Livewire\Component;
+
+class Runs extends Component
+{
+    public int $month;
+    public int $year;
+
+    public function mount(): void
+    {
+        $this->month = (int) now()->month;
+        $this->year = (int) now()->year;
+    }
+
+    public function create(PayrollRunService $service): void
+    {
+        $this->authorize('manage-hr');
+        $this->validate(['month' => 'integer|min:1|max:12', 'year' => 'integer|min:2000|max:2200']);
+        try {
+            $service->createRun($this->month, $this->year, auth()->id());
+            session()->flash('success', __('hr.payroll_created'));
+        } catch (\RuntimeException $e) {
+            $this->addError('payroll', $e->getMessage());
+        }
+    }
+
+    public function process(int $id, PayrollRunService $service): void
+    {
+        $this->authorize('manage-hr');
+        try {
+            $service->process(PayrollRun::findOrFail($id));
+            session()->flash('success', __('hr.payroll_completed'));
+        } catch (\RuntimeException $e) {
+            $this->addError('payroll', $e->getMessage());
+        }
+    }
+
+    public function render()
+    {
+        return view('livewire.payroll.runs', [
+            'runs' => PayrollRun::with(['payslips.employee', 'complianceSetting'])
+                ->withCount('payslips')
+                ->orderByDesc('year')
+                ->orderByDesc('month')
+                ->get(),
+        ]);
+    }
+}

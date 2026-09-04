@@ -1,0 +1,31 @@
+{
+  "ssc_employee_percent": null,
+  "ssc_employer_percent": null,
+  "ssc_enrollment_cutoff_date": null,
+  "ssc_ceiling_pre_cutoff_jod": null,
+  "ssc_ceiling_post_cutoff_jod": null,
+  "income_tax_brackets": [
+    { "up_to_jod": null, "rate_percent": null }
+  ],
+  "personal_exemption_annual_jod": null,
+  "high_earner_surcharge_threshold_annual_jod": null,
+  "high_earner_surcharge_percent": null,
+  "annual_leave_tiers": [
+    { "min_years": 0, "days": null }
+  ],
+  "sick_leave_paid_days": null,
+  "sick_leave_hospital_extra_days": null,
+  "overtime_multiplier_standard": null,
+  "overtime_multiplier_rest_holiday": null,
+  "overtime_daily_cap_hours": null,
+  "overtime_weekly_cap_hours": null,
+  "overtime_monthly_cap_hours": null,
+  "overtime_warning_percent": null,
+  "notice_period_days": null,
+  "monthly_hours_divisor": null,
+  "salary_daily_divisor": null,
+  "weekly_rest_days": [],
+  "leave_count_public_holidays": false,
+  "leave_count_weekly_rest_days": false,
+  "filing_deadlines": []
+}

@@ -1,0 +1,1 @@
+@props(['label','value'])<div class="col-6 col-xl-3"><div class="card h-100"><div class="card-body"><div class="text-muted small">{{$label}}</div><div class="fs-3 fw-semibold">{{$value}}</div></div></div></div>
