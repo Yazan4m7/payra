@@ -1,0 +1,4 @@
+<?php
+namespace App\Http\Controllers;
+use App\Models\BiometricDevice; use App\Services\BiometricIngestService; use Illuminate\Http\JsonResponse; use Illuminate\Http\Request; use RuntimeException;
+class BiometricEventController extends Controller { public function __invoke(Request $request,BiometricDevice $device,BiometricIngestService $service):JsonResponse{try{$event=$service->ingest($device,(string)$request->header('X-Payra-Device-Token'),$request->validate(['event_id'=>'required|string|max:191','employee_id'=>'required|string|max:100','event_type'=>'required|in:in,out','event_at'=>'required|string|max:64']));return response()->json(['ok'=>true,'event_id'=>$event->external_event_id,'processed'=>filled($event->processed_at)]);}catch(RuntimeException $e){return response()->json(['ok'=>false,'message'=>$e->getMessage()],422);}} }
