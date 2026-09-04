@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\ComplianceSetting;
 use App\Models\Employee;
+use App\Models\EmployeeEarning;
 use App\Models\OvertimeEntry;
 use App\Support\Money;
 use Brick\Math\BigDecimal;
@@ -21,7 +22,8 @@ class PayrollEngine
 
     public function calculate(Employee $employee, int $month, int $year, ?ComplianceSetting $setting = null): array
     {
-        $periodEnd = Carbon::create($year, $month, 1)->endOfMonth();
+        $periodStart = Carbon::create($year, $month, 1)->startOfMonth();
+        $periodEnd = $periodStart->copy()->endOfMonth();
         $record = $setting ?: $this->compliance->forDate($periodEnd);
         $settings = $record->settings;
         $this->compliance->require($settings, [
@@ -30,17 +32,29 @@ class PayrollEngine
             'overtime_multiplier_standard', 'overtime_multiplier_rest_holiday', 'monthly_hours_divisor',
         ]);
 
-        $gross = Money::d($employee->salary);
-        $ssc = $this->ssc->calculate($gross, $employee->ssc_enrollment_date, $settings);
-        $overtimeCalculation = $this->overtimePay($employee, $month, $year, $gross);
+        $baseSalary = Money::d($employee->salary);
+        $earningCalculation = $this->earningsForPeriod($employee, $periodStart, $periodEnd);
+        $earnings = $earningCalculation['total'];
+        $taxableEarnings = $earningCalculation['taxable'];
+        $sscEarnings = $earningCalculation['ssc_applicable'];
+
+        $sscBasePay = $baseSalary->plus($sscEarnings);
+        $ssc = $this->ssc->calculate($sscBasePay, $employee->ssc_enrollment_date, $settings);
+        $overtimeCalculation = $this->overtimePay($employee, $month, $year, $baseSalary);
         $overtime = $overtimeCalculation['total'];
 
-        $monthlyTaxable = $gross->plus($overtime)->minus($ssc['employee']);
+        $monthlyTaxable = $baseSalary
+            ->plus($overtime)
+            ->plus($taxableEarnings)
+            ->minus($ssc['employee']);
         if ($monthlyTaxable->isLessThan(0)) {
             $monthlyTaxable = BigDecimal::zero();
         }
 
-        $annualIncome = $gross->plus($overtime)->multipliedBy('12');
+        $annualIncome = $baseSalary
+            ->plus($overtime)
+            ->plus($taxableEarnings)
+            ->multipliedBy('12');
         $annualTaxable = $monthlyTaxable
             ->multipliedBy('12')
             ->minus((string) $settings['personal_exemption_annual_jod']);
@@ -60,11 +74,17 @@ class PayrollEngine
 
         $incomeTax = $annualTax->dividedBy('12', 12, RoundingMode::HALF_UP);
         $monthlySurcharge = $annualSurcharge->dividedBy('12', 12, RoundingMode::HALF_UP);
-        $net = $gross->plus($overtime)->minus($ssc['employee'])->minus($incomeTax)->minus($monthlySurcharge);
+        $net = $baseSalary
+            ->plus($overtime)
+            ->plus($earnings)
+            ->minus($ssc['employee'])
+            ->minus($incomeTax)
+            ->minus($monthlySurcharge);
 
         return [
-            'gross_salary' => Money::round($gross),
+            'gross_salary' => Money::round($baseSalary),
             'overtime_pay' => Money::round($overtime),
+            'earnings_total' => Money::round($earnings),
             'ssc_employee' => Money::round($ssc['employee']),
             'ssc_employer' => Money::round($ssc['employer']),
             'income_tax' => Money::round($incomeTax),
@@ -75,6 +95,9 @@ class PayrollEngine
                 'setting_version' => $record->version_label,
                 'effective_date' => $record->effective_date->toDateString(),
                 'settings' => $settings,
+                'base_salary' => Money::round($baseSalary),
+                'earnings_total' => Money::round($earnings),
+                'earnings_details' => $earningCalculation['details'],
                 'ssc_ceiling_used' => Money::round($ssc['ceiling']),
                 'ssc_base' => Money::round($ssc['base']),
                 'pre_cutoff_enrollment' => $ssc['pre_cutoff'],
@@ -82,6 +105,50 @@ class PayrollEngine
                 'annual_taxable' => Money::round($annualTaxable),
                 'overtime_details' => $overtimeCalculation['details'],
             ],
+        ];
+    }
+
+    private function earningsForPeriod(Employee $employee, Carbon $periodStart, Carbon $periodEnd): array
+    {
+        $rows = EmployeeEarning::query()
+            ->where('employee_id', $employee->id)
+            ->applicableTo($periodStart, $periodEnd)
+            ->orderBy('category')
+            ->orderBy('id')
+            ->get();
+
+        $total = BigDecimal::zero();
+        $taxable = BigDecimal::zero();
+        $sscApplicable = BigDecimal::zero();
+        $details = [];
+
+        foreach ($rows as $earning) {
+            $amount = Money::d($earning->amount);
+            $total = $total->plus($amount);
+
+            if ($earning->taxable) {
+                $taxable = $taxable->plus($amount);
+            }
+            if ($earning->ssc_applicable) {
+                $sscApplicable = $sscApplicable->plus($amount);
+            }
+
+            $details[] = [
+                'earning_id' => $earning->id,
+                'category' => $earning->category,
+                'name' => $earning->name,
+                'amount_jod' => Money::round($amount),
+                'taxable' => $earning->taxable,
+                'ssc_applicable' => $earning->ssc_applicable,
+                'recurring' => $earning->recurring,
+            ];
+        }
+
+        return [
+            'total' => $total,
+            'taxable' => $taxable,
+            'ssc_applicable' => $sscApplicable,
+            'details' => $details,
         ];
     }
 
@@ -138,5 +205,4 @@ class PayrollEngine
 
         return ['total' => $total, 'details' => $details];
     }
-
 }

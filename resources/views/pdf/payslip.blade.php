@@ -31,8 +31,11 @@
 <table>
 <thead><tr><th>البند / Item</th><th class="num">JOD</th></tr></thead>
 <tbody>
-<tr><td>الراتب الإجمالي / Gross salary</td><td class="num">{{ $payslip->gross_salary }}</td></tr>
+<tr><td>الراتب الأساسي / Base salary</td><td class="num">{{ $payslip->gross_salary }}</td></tr>
 <tr><td>العمل الإضافي / Overtime</td><td class="num">+ {{ $payslip->overtime_pay }}</td></tr>
+@foreach(($payslip->calculation_snapshot['earnings_details'] ?? []) as $earning)
+<tr><td>{{ $earning['name'] }} / {{ ucfirst($earning['category']) }}</td><td class="num">+ {{ $earning['amount_jod'] }}</td></tr>
+@endforeach
 <tr><td>حصة الموظف للضمان / Employee SSC</td><td class="num">- {{ $payslip->ssc_employee }}</td></tr>
 <tr><td>ضريبة الدخل / Income tax</td><td class="num">- {{ $payslip->income_tax }}</td></tr>
 <tr><td>الرسم الإضافي / Surcharge</td><td class="num">- {{ $payslip->surcharge }}</td></tr>

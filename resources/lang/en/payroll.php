@@ -1,0 +1,27 @@
+<?php
+
+return [
+    'earnings' => 'Earnings',
+    'add_earning' => 'Add earning',
+    'edit_earning' => 'Edit earning',
+    'category' => 'Category',
+    'allowance' => 'Allowance',
+    'bonus' => 'Bonus',
+    'commission' => 'Commission',
+    'amount_jod' => 'Amount (JOD)',
+    'recurrence' => 'Recurrence',
+    'recurring' => 'Recurring',
+    'one_time' => 'One-time',
+    'starts_on' => 'Starts on',
+    'ends_on' => 'Ends on',
+    'one_time_date' => 'Payment date',
+    'taxable' => 'Taxable',
+    'non_taxable' => 'Non-taxable',
+    'ssc_applicable' => 'SSC applicable',
+    'ssc_exempt' => 'SSC exempt',
+    'notes' => 'Notes',
+    'flags' => 'Treatment',
+    'confirm_delete' => 'Delete this earning?',
+    'base_salary' => 'Base salary',
+    'earnings_total' => 'Earnings',
+];

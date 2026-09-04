@@ -2,6 +2,7 @@
     @if(auth()->user()->isHr())
         <a class="nav-link {{ request()->routeIs('dashboard') ? 'active' : '' }}" href="{{ route('dashboard') }}">{{ __('hr.dashboard') }}</a>
         <a class="nav-link {{ request()->routeIs('employees.*') ? 'active' : '' }}" href="{{ route('employees.index') }}">{{ __('hr.employees') }}</a>
+        <a class="nav-link {{ request()->routeIs('earnings.*') ? 'active' : '' }}" href="{{ route('earnings.index') }}">{{ __('payroll.earnings') }}</a>
         <a class="nav-link {{ request()->routeIs('payroll.*') ? 'active' : '' }}" href="{{ route('payroll.runs') }}">{{ __('hr.payroll') }}</a>
         <a class="nav-link {{ request()->routeIs('leave.*') ? 'active' : '' }}" href="{{ route('leave.requests') }}">{{ __('hr.leave') }}</a>
         <a class="nav-link {{ request()->routeIs('overtime.*') ? 'active' : '' }}" href="{{ route('overtime.entries') }}">{{ __('hr.overtime') }}</a>

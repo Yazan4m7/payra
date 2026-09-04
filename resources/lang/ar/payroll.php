@@ -1,0 +1,27 @@
+<?php
+
+return [
+    'earnings' => 'الاستحقاقات',
+    'add_earning' => 'إضافة استحقاق',
+    'edit_earning' => 'تعديل استحقاق',
+    'category' => 'التصنيف',
+    'allowance' => 'بدل',
+    'bonus' => 'مكافأة',
+    'commission' => 'عمولة',
+    'amount_jod' => 'المبلغ (د.أ)',
+    'recurrence' => 'التكرار',
+    'recurring' => 'متكرر',
+    'one_time' => 'مرة واحدة',
+    'starts_on' => 'يبدأ من',
+    'ends_on' => 'ينتهي في',
+    'one_time_date' => 'تاريخ الصرف',
+    'taxable' => 'خاضع للضريبة',
+    'non_taxable' => 'غير خاضع للضريبة',
+    'ssc_applicable' => 'خاضع للضمان',
+    'ssc_exempt' => 'غير خاضع للضمان',
+    'notes' => 'ملاحظات',
+    'flags' => 'المعالجة',
+    'confirm_delete' => 'حذف هذا الاستحقاق؟',
+    'base_salary' => 'الراتب الأساسي',
+    'earnings_total' => 'الاستحقاقات',
+];

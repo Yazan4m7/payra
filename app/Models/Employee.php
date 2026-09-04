@@ -22,13 +22,45 @@ class Employee extends Model
         'salary' => 'decimal:3',
     ];
 
-    public function user(): BelongsTo { return $this->belongsTo(User::class); }
-    public function payslips(): HasMany { return $this->hasMany(Payslip::class); }
-    public function leaveBalances(): HasMany { return $this->hasMany(LeaveBalance::class); }
-    public function leaveRequests(): HasMany { return $this->hasMany(LeaveRequest::class); }
-    public function overtimeEntries(): HasMany { return $this->hasMany(OvertimeEntry::class); }
-    public function onboardingTasks(): HasMany { return $this->hasMany(OnboardingTask::class); }
-    public function terminations(): HasMany { return $this->hasMany(TerminationRecord::class); }
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
+    }
+
+    public function payslips(): HasMany
+    {
+        return $this->hasMany(Payslip::class);
+    }
+
+    public function earnings(): HasMany
+    {
+        return $this->hasMany(EmployeeEarning::class);
+    }
+
+    public function leaveBalances(): HasMany
+    {
+        return $this->hasMany(LeaveBalance::class);
+    }
+
+    public function leaveRequests(): HasMany
+    {
+        return $this->hasMany(LeaveRequest::class);
+    }
+
+    public function overtimeEntries(): HasMany
+    {
+        return $this->hasMany(OvertimeEntry::class);
+    }
+
+    public function onboardingTasks(): HasMany
+    {
+        return $this->hasMany(OnboardingTask::class);
+    }
+
+    public function terminations(): HasMany
+    {
+        return $this->hasMany(TerminationRecord::class);
+    }
 
     public function isSscRegistered(): bool
     {
