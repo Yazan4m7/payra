@@ -1,76 +1,15 @@
 <?php
-
 namespace App\Services;
-
-use App\Models\Employee;
-use App\Models\PayrollRun;
-use Carbon\Carbon;
-use Illuminate\Support\Facades\DB;
-use RuntimeException;
-
+use App\Models\Employee; use App\Models\PayrollRun; use App\Models\Payslip; use App\Support\Money; use Brick\Math\BigDecimal; use Carbon\Carbon; use Illuminate\Database\Eloquent\Builder; use Illuminate\Support\Facades\DB; use RuntimeException;
 class PayrollRunService
 {
-    public function __construct(private PayrollEngine $engine, private ComplianceSettingsService $compliance) {}
-
-    public function createRun(int $month, int $year, int $userId): PayrollRun
-    {
-        return DB::transaction(function () use ($month, $year, $userId) {
-            if (PayrollRun::where('month', $month)->where('year', $year)->exists()) {
-                throw new RuntimeException(__('hr.error_payroll_exists'));
-            }
-
-            $periodEnd = Carbon::create($year, $month, 1)->endOfMonth();
-            $setting = $this->compliance->forDate($periodEnd);
-
-            return PayrollRun::create([
-                'month' => $month,
-                'year' => $year,
-                'status' => 'draft',
-                'compliance_setting_id' => $setting->id,
-                'created_by' => $userId,
-            ]);
-        });
-    }
-
-    public function process(PayrollRun $run): PayrollRun
-    {
-        if ($run->status === 'completed') {
-            return $run;
-        }
-        if ($run->status !== 'draft') {
-            throw new RuntimeException(__('hr.error_payroll_draft_only'));
-        }
-
-        DB::transaction(function () use ($run) {
-            $run->update(['status' => 'processing']);
-            $run->loadMissing('complianceSetting');
-            $periodEnd = Carbon::create($run->year, $run->month, 1)->endOfMonth();
-
-            Employee::query()
-                ->whereIn('status', ['active', 'on_leave'])
-                ->whereDate('hire_date', '<=', $periodEnd)
-                ->orderBy('id')
-                ->cursor()
-                ->each(function (Employee $employee) use ($run) {
-                    $calculation = $this->engine->calculate($employee, $run->month, $run->year, $run->complianceSetting);
-                    $run->payslips()->updateOrCreate(
-                        ['employee_id' => $employee->id],
-                        [
-                            'gross_salary' => $calculation['gross_salary'],
-                            'overtime_pay' => $calculation['overtime_pay'],
-                            'ssc_employee' => $calculation['ssc_employee'],
-                            'ssc_employer' => $calculation['ssc_employer'],
-                            'income_tax' => $calculation['income_tax'],
-                            'surcharge' => $calculation['surcharge'],
-                            'net_salary' => $calculation['net_salary'],
-                            'calculation_snapshot' => $calculation['snapshot'],
-                        ]
-                    );
-                });
-
-            $run->update(['status' => 'completed', 'completed_at' => now()]);
-        });
-
-        return $run->refresh();
-    }
+public function __construct(private PayrollEngine $engine,private ComplianceSettingsService $compliance,private LoanService $loans,private PayrollAdjustmentService $adjustments){}
+public function createRun(int $month,int $year,int $userId,string $runType='regular',?string $label=null):PayrollRun{if(!in_array($runType,['regular','off_cycle'],true))throw new RuntimeException('Invalid payroll run type.');return DB::transaction(function()use($month,$year,$userId,$runType,$label){$sequence=$runType==='regular'?1:(int)PayrollRun::where('month',$month)->where('year',$year)->where('run_type','off_cycle')->lockForUpdate()->max('sequence')+1;if($runType==='regular'&&PayrollRun::where('month',$month)->where('year',$year)->where('run_type','regular')->exists())throw new RuntimeException(__('hr.error_payroll_exists'));$setting=$this->compliance->forDate(Carbon::create($year,$month,1)->endOfMonth());return PayrollRun::create(['month'=>$month,'year'=>$year,'run_type'=>$runType,'sequence'=>$sequence,'label'=>$label,'status'=>'draft','compliance_setting_id'=>$setting->id,'created_by'=>$userId]);});}
+public function process(PayrollRun $run):PayrollRun{if($run->isLocked())throw new RuntimeException('Approved payroll is locked and cannot be recalculated.');DB::transaction(function()use($run){$run=PayrollRun::whereKey($run->id)->lockForUpdate()->firstOrFail();if($run->status!=='draft')throw new RuntimeException(__('hr.error_payroll_draft_only'));$run->update(['status'=>'processing']);$run->loadMissing('complianceSetting');if($run->isOffCycle())$this->processOffCycle($run);else $this->processRegular($run);$run->update(['status'=>'calculated','completed_at'=>now(),'calculation_hash'=>$this->fingerprint($run->refresh())]);});return $run->refresh();}
+private function processRegular(PayrollRun $run):void{$start=Carbon::create($run->year,$run->month,1)->startOfMonth();$end=$start->copy()->endOfMonth();Employee::query()->whereDate('hire_date','<=',$end)->where(function(Builder $q)use($start,$end){$q->whereIn('status',['active','on_leave'])->orWhereHas('terminations',fn(Builder $t)=>$t->whereBetween('termination_date',[$start->toDateString(),$end->toDateString()]));})->orderBy('id')->cursor()->each(function(Employee $e)use($run){$c=$this->engine->calculate($e,$run->month,$run->year,$run->complianceSetting);$this->storePayslip($run,$e,$c);});}
+private function processOffCycle(PayrollRun $run):void{$ids=$run->targetedAdjustments()->where('status','approved')->whereNull('applied_payroll_run_id')->distinct()->pluck('employee_id');if($ids->isEmpty())throw new RuntimeException('Off-cycle payroll has no approved targeted adjustments.');Employee::whereIn('id',$ids)->orderBy('id')->get()->each(function(Employee $e)use($run){$a=$this->adjustments->forTargetRun($e,$run);$net=$a['earning_total']->minus($a['deduction_total']);if($net->isLessThan(0))throw new RuntimeException('Off-cycle payroll cannot produce a negative employee payment.');$zero='0.000';$c=['contract_salary'=>$zero,'gross_salary'=>$zero,'proration_adjustment'=>$zero,'overtime_pay'=>$zero,'earnings_total'=>$zero,'adjustment_earnings_total'=>Money::round($a['earning_total']),'deductions_total'=>$zero,'adjustment_deductions_total'=>Money::round($a['deduction_total']),'loan_deductions_total'=>$zero,'unpaid_absence_deduction'=>$zero,'ssc_employee'=>$zero,'ssc_employer'=>$zero,'income_tax'=>$zero,'surcharge'=>$zero,'net_salary'=>Money::round($net),'snapshot'=>['off_cycle'=>true,'payroll_adjustments'=>$a['details'],'loan_repayment_details'=>[],'setting_version'=>$run->complianceSetting->version_label,'effective_date'=>$run->complianceSetting->effective_date->toDateString()]];$this->storePayslip($run,$e,$c);});}
+private function storePayslip(PayrollRun $run,Employee $e,array $c):void{$run->payslips()->updateOrCreate(['employee_id'=>$e->id],['contract_salary'=>$c['contract_salary'],'gross_salary'=>$c['gross_salary'],'proration_adjustment'=>$c['proration_adjustment'],'overtime_pay'=>$c['overtime_pay'],'earnings_total'=>$c['earnings_total'],'adjustment_earnings_total'=>$c['adjustment_earnings_total'],'deductions_total'=>$c['deductions_total'],'adjustment_deductions_total'=>$c['adjustment_deductions_total'],'loan_deductions_total'=>$c['loan_deductions_total'],'unpaid_absence_deduction'=>$c['unpaid_absence_deduction'],'ssc_employee'=>$c['ssc_employee'],'ssc_employer'=>$c['ssc_employer'],'income_tax'=>$c['income_tax'],'surcharge'=>$c['surcharge'],'net_salary'=>$c['net_salary'],'calculation_snapshot'=>$c['snapshot']]);}
+public function approve(PayrollRun $run,int $userId):PayrollRun{return DB::transaction(function()use($run,$userId){$run=PayrollRun::whereKey($run->id)->lockForUpdate()->firstOrFail();if($run->status==='approved'&&$run->isLocked())return $run;if($run->status!=='calculated')throw new RuntimeException('Only a calculated payroll run can be approved.');$actual=$this->fingerprint($run);if(!$run->calculation_hash||!hash_equals($run->calculation_hash,$actual))throw new RuntimeException('Payroll calculation changed after calculation. Recalculate before approval.');$run->payslips()->orderBy('employee_id')->get()->each(function(Payslip $p){$s=$p->calculation_snapshot??[];$this->loans->recordRepayments($p,$s['loan_repayment_details']??[]);$this->adjustments->markApplied($p,$s['payroll_adjustments']??[]);});$run->update(['status'=>'approved','approved_by'=>$userId,'approved_at'=>now(),'locked_at'=>now()]);return $run->refresh();});}
+public function void(PayrollRun $run):PayrollRun{return DB::transaction(function()use($run){$run=PayrollRun::whereKey($run->id)->lockForUpdate()->firstOrFail();if($run->isLocked())throw new RuntimeException('Approved payroll cannot be voided; use an adjustment in a later payroll.');if(!in_array($run->status,['draft','calculated'],true))throw new RuntimeException('Only draft or calculated payroll can be voided.');$run->update(['status'=>'void']);return $run->refresh();});}
+public function fingerprint(PayrollRun $run):string{$rows=$run->payslips()->orderBy('employee_id')->get()->map(fn(Payslip $p)=>['employee_id'=>$p->employee_id,'contract_salary'=>(string)$p->contract_salary,'gross_salary'=>(string)$p->gross_salary,'proration_adjustment'=>(string)$p->proration_adjustment,'overtime_pay'=>(string)$p->overtime_pay,'earnings_total'=>(string)$p->earnings_total,'adjustment_earnings_total'=>(string)$p->adjustment_earnings_total,'deductions_total'=>(string)$p->deductions_total,'adjustment_deductions_total'=>(string)$p->adjustment_deductions_total,'loan_deductions_total'=>(string)$p->loan_deductions_total,'unpaid_absence_deduction'=>(string)$p->unpaid_absence_deduction,'ssc_employee'=>(string)$p->ssc_employee,'ssc_employer'=>(string)$p->ssc_employer,'income_tax'=>(string)$p->income_tax,'surcharge'=>(string)$p->surcharge,'net_salary'=>(string)$p->net_salary,'snapshot'=>$p->calculation_snapshot])->values()->all();return hash('sha256',json_encode($rows,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR));}
 }

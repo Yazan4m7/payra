@@ -3,7 +3,8 @@ name: Heavy Tests
 on:
   push:
     branches:
-      - codex/heavy-tests-20260904
+      - main
+      - codex/payra-v1-completion-20260904
   pull_request:
     branches:
       - main
@@ -67,57 +68,80 @@ jobs:
           extensions: mbstring, bcmath, pdo_mysql
           coverage: none
 
+      - name: Prepare test environment
+        run: touch .env
+
       - name: Validate Composer metadata
-        continue-on-error: true
         run: composer validate --strict
 
       - name: Install PHP dependencies
         run: composer install --no-interaction --prefer-dist --no-progress
 
       - name: PHP syntax scan
-        continue-on-error: true
         run: find app bootstrap config database routes tests -type f -name '*.php' -print0 | xargs -0 -n1 php -l
 
       - name: Laravel boot and route registration
-        continue-on-error: true
         run: |
           php artisan about
           php artisan route:list
 
       - name: Config cache smoke test
-        continue-on-error: true
         run: |
           php artisan config:cache
           php artisan config:clear
 
-      - name: Code style check
-        continue-on-error: true
-        run: ./vendor/bin/pint --test
-
       - name: Fresh central database migration
-        continue-on-error: true
         run: php artisan migrate:fresh --force
 
       - name: Full PHPUnit suite
-        continue-on-error: true
-        run: php artisan test
+        run: php artisan test --display-warnings
 
-      - name: Migration rollback/forward smoke test
-        continue-on-error: true
+      - name: 500 employee payroll stress
+        if: matrix.php == '8.3'
+        run: php artisan test tests/Stress/LargePayrollStressTest.php --display-warnings
+
+      - name: Migration rollback and forward
         run: |
           php artisan migrate:rollback --step=1 --force
           php artisan migrate --force
 
-      - name: Laravel optimization smoke test
-        continue-on-error: true
+      - name: Laravel production optimization
         run: |
           php artisan optimize
           php artisan about
-          php artisan optimize:clear
+
+      - name: Ephemeral staging payroll cycle
+        if: matrix.php == '8.3'
+        run: php artisan test tests/Feature/ProductionPayrollCycleTest.php --display-warnings
+
+      - name: Concurrent HTTP health load
+        if: matrix.php == '8.3'
+        shell: bash
+        run: |
+          set -euo pipefail
+          PHP_CLI_SERVER_WORKERS=4 php artisan serve --host=127.0.0.1 --port=8000 > storage/logs/http-load.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
+          READY=0
+          for i in $(seq 1 60); do
+            if curl -fsS -o /dev/null http://127.0.0.1:8000/up; then
+              READY=1
+              break
+            fi
+            sleep 0.25
+          done
+          test "$READY" -eq 1
+          seq 1 2000 | xargs -P50 -I{} curl -fsS -o /dev/null http://127.0.0.1:8000/up
 
       - name: Composer security audit
-        continue-on-error: true
         run: composer audit
+
+      - name: Clear optimization caches
+        run: php artisan optimize:clear
+
+      - name: Style advisory
+        continue-on-error: true
+        run: ./vendor/bin/pint --test
 
   frontend:
     name: Frontend build and audit
@@ -133,5 +157,4 @@ jobs:
       - name: Production build
         run: npm run build
       - name: Dependency security audit
-        continue-on-error: true
         run: npm audit --audit-level=high

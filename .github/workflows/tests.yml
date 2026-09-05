@@ -59,8 +59,10 @@ jobs:
         with:
           node-version: '22'
           cache: npm
+      - name: Ensure Laravel environment file exists
+        run: touch .env
       - run: composer install --no-interaction --prefer-dist --no-progress
-      - run: npm install --no-audit --no-fund
+      - run: npm ci --no-audit --no-fund
       - run: php artisan migrate --force
-      - run: php artisan test
+      - run: php artisan test --display-warnings
       - run: npm run build

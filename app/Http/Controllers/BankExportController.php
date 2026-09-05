@@ -9,21 +9,17 @@ class BankExportController extends Controller
 {
     public function __invoke(PayrollRun $run): StreamedResponse
     {
-        abort_unless($run->status === 'completed', 422, 'Payroll run must be completed.');
+        abort_unless(in_array($run->status, ['approved','completed'], true) && $run->isLocked(), 422, 'Payroll run must be approved and locked.');
         $run->load('payslips.employee');
         $missing = $run->payslips->filter(fn ($p) => blank($p->employee->bank_iban));
         abort_if($missing->isNotEmpty(), 422, 'Bank export blocked: one or more employees have no IBAN.');
 
         return response()->streamDownload(function () use ($run) {
             $handle = fopen('php://output', 'w');
-            fwrite($handle, "\xEF\xBB\xBF"); // UTF-8 BOM for Arabic names in spreadsheet tools.
+            fwrite($handle, "\xEF\xBB\xBF");
             fputcsv($handle, ['employee_name', 'iban', 'net_amount_jod']);
             foreach ($run->payslips as $payslip) {
-                fputcsv($handle, [
-                    $this->spreadsheetSafe($payslip->employee->name),
-                    $payslip->employee->bank_iban,
-                    $payslip->net_salary,
-                ]);
+                fputcsv($handle, [$this->spreadsheetSafe($payslip->employee->name), $payslip->employee->bank_iban, $payslip->net_salary]);
             }
             fclose($handle);
         }, "bank-transfer-{$run->year}-{$run->month}.csv", ['Content-Type' => 'text/csv; charset=UTF-8']);
