@@ -5,12 +5,12 @@
   "description": "Multi-tenant Jordan payroll and HR compliance SaaS",
   "require": {
     "php": "^8.2",
-    "laravel/framework": "^11.0",
+    "barryvdh/laravel-dompdf": "^3.0",
+    "brick/math": "^0.12|^0.13|^0.14",
+    "laravel/framework": "^12.65",
     "laravel/tinker": "^2.9",
     "livewire/livewire": "^3.0",
-    "stancl/tenancy": "^3.9",
-    "brick/math": "^0.12|^0.13|^0.14",
-    "barryvdh/laravel-dompdf": "^3.0"
+    "stancl/tenancy": "^3.9"
   },
   "require-dev": {
     "fakerphp/faker": "^1.23",
@@ -35,5 +35,6 @@
   },
   "config": {"optimize-autoloader": true, "preferred-install": "dist", "sort-packages": true},
   "minimum-stability": "stable",
-  "prefer-stable": true
+  "prefer-stable": true,
+  "license": ["proprietary"]
 }
