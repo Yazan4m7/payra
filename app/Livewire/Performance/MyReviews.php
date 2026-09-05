@@ -1,0 +1,4 @@
+<?php
+namespace App\Livewire\Performance;
+use App\Models\PerformanceReview; use App\Services\PerformanceReviewService; use Livewire\Component;
+class MyReviews extends Component { public array $comments=[]; public function acknowledge(int $id,PerformanceReviewService $service):void{$employee=auth()->user()->employee;if(!$employee)abort(403);try{$service->acknowledge(PerformanceReview::findOrFail($id),$employee,$this->comments[$id]??null);}catch(\RuntimeException $e){$this->addError('performance',$e->getMessage());}} public function render(){ $employee=auth()->user()->employee; return view('livewire.performance.my-reviews',['reviews'=>$employee?PerformanceReview::with('cycle')->where('employee_id',$employee->id)->whereIn('status',['submitted','acknowledged'])->latest('id')->get():collect()]); } }
