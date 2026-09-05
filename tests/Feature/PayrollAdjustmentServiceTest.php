@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\ComplianceSetting;
 use App\Models\Employee;
 use App\Models\PayrollAdjustment;
 use App\Models\PayrollRun;
@@ -31,7 +32,12 @@ class PayrollAdjustmentServiceTest extends TestCase
             $this->assertSame('25.000', Money::round($calc['earning_total']));
             $this->assertCount(1, $calc['details']);
 
-            $run = PayrollRun::create(['month'=>9,'year'=>2026,'status'=>'draft','compliance_setting_id'=>1]);
+            $setting = ComplianceSetting::create([
+                'version_label' => 'fixture-2026',
+                'effective_date' => '2026-01-01',
+                'settings' => [],
+            ]);
+            $run = PayrollRun::create(['month'=>9,'year'=>2026,'status'=>'draft','compliance_setting_id'=>$setting->id]);
             $payslip = Payslip::create(['payroll_run_id'=>$run->id,'employee_id'=>$employee->id,'calculation_snapshot'=>[]]);
             $service->markApplied($payslip, $calc['details']);
             $this->assertSame('applied', $adjustment->fresh()->status);

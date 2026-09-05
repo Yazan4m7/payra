@@ -10,12 +10,14 @@ return new class extends Migration
     {
         Schema::create('biometric_devices', function (Blueprint $table) {
             $table->id();
+            $table->uuid('uuid')->unique();
             $table->string('name');
-            $table->string('device_code')->unique();
-            $table->string('secret_hash');
+            $table->string('token_hash', 64);
+            $table->string('timezone')->default('Asia/Amman');
             $table->boolean('active')->default(true);
             $table->timestamp('last_seen_at')->nullable();
             $table->timestamps();
+            $table->softDeletes();
         });
 
         Schema::create('biometric_employee_mappings', function (Blueprint $table) {
@@ -32,16 +34,16 @@ return new class extends Migration
             $table->id();
             $table->foreignId('biometric_device_id')->constrained('biometric_devices')->cascadeOnDelete();
             $table->string('external_event_id');
-            $table->foreignId('employee_id')->nullable()->constrained()->nullOnDelete();
             $table->string('external_employee_id');
-            $table->timestamp('occurred_at');
-            $table->string('event_type')->default('punch');
+            $table->enum('event_type', ['in', 'out']);
+            $table->timestampTz('event_at');
             $table->string('payload_hash', 64);
-            $table->json('payload')->nullable();
+            $table->foreignId('attendance_entry_id')->nullable()->constrained('attendance_entries')->nullOnDelete();
             $table->timestamp('processed_at')->nullable();
+            $table->text('error')->nullable();
             $table->timestamps();
             $table->unique(['biometric_device_id', 'external_event_id'], 'bio_event_device_external_uq');
-            $table->index(['employee_id', 'occurred_at'], 'bio_event_employee_time_idx');
+            $table->index(['external_employee_id', 'event_at'], 'bio_event_employee_time_idx');
         });
     }
 
