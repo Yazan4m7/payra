@@ -50,14 +50,18 @@ class PayrollEngine
         $absence = $this->absences->deductionForPeriod($employee, $start, $end, $settings);
 
         $earnedBase = $scheduledBase->minus($absence['total']);
-        if ($earnedBase->isLessThan(0)) $earnedBase = BigDecimal::zero();
+        if ($earnedBase->isLessThan(0)) {
+            $earnedBase = BigDecimal::zero();
+        }
 
         $sscBase = $earnedBase
             ->plus($earnings['ssc_applicable'])
             ->plus($adjustments['ssc_earnings'])
             ->minus($deductions['ssc_base_reduction'])
             ->minus($adjustments['ssc_base_reduction']);
-        if ($sscBase->isLessThan(0)) $sscBase = BigDecimal::zero();
+        if ($sscBase->isLessThan(0)) {
+            $sscBase = BigDecimal::zero();
+        }
         $ssc = $this->ssc->calculate($sscBase, $employee->ssc_enrollment_date, $settings);
 
         $overtimeCalculation = $this->overtimePay($employee, $month, $year);
@@ -69,7 +73,9 @@ class PayrollEngine
             ->minus($ssc['employee'])
             ->minus($deductions['taxable_reduction'])
             ->minus($adjustments['taxable_reduction']);
-        if ($monthlyTaxable->isLessThan(0)) $monthlyTaxable = BigDecimal::zero();
+        if ($monthlyTaxable->isLessThan(0)) {
+            $monthlyTaxable = BigDecimal::zero();
+        }
 
         $annualIncome = $earnedBase
             ->plus($overtime)
@@ -78,7 +84,9 @@ class PayrollEngine
             ->multipliedBy('12');
         $annualTaxable = $monthlyTaxable->multipliedBy('12')
             ->minus((string) $settings['personal_exemption_annual_jod']);
-        if ($annualTaxable->isLessThan(0)) $annualTaxable = BigDecimal::zero();
+        if ($annualTaxable->isLessThan(0)) {
+            $annualTaxable = BigDecimal::zero();
+        }
 
         $annualTax = $this->taxCalculator->calculate($annualTaxable, $settings['income_tax_brackets']);
         $annualSurcharge = BigDecimal::zero();
@@ -92,18 +100,11 @@ class PayrollEngine
         $incomeTax = $annualTax->dividedBy('12', 12, RoundingMode::HALF_UP);
         $surcharge = $annualSurcharge->dividedBy('12', 12, RoundingMode::HALF_UP);
 
-        $net = $earnedBase
-            ->plus($overtime)
-            ->plus($earnings['total'])
-            ->plus($adjustments['earning_total'])
-            ->minus($deductions['total'])
-            ->minus($adjustments['deduction_total'])
-            ->minus($loans['total'])
-            ->minus($ssc['employee'])
-            ->minus($incomeTax)
-            ->minus($surcharge);
-
-        return [
+        // Every persisted payslip component is JOD at three decimals. Net pay must be
+        // derived from those exact persisted amounts, not from hidden higher-precision
+        // intermediates, otherwise the visible payslip can differ from the bank/GL net
+        // by 0.001 JOD after independent component rounding.
+        $persisted = [
             'contract_salary' => $proration['contract_salary'],
             'gross_salary' => $proration['payable_salary'],
             'proration_adjustment' => $proration['proration_adjustment'],
@@ -118,7 +119,28 @@ class PayrollEngine
             'ssc_employer' => Money::round($ssc['employer']),
             'income_tax' => Money::round($incomeTax),
             'surcharge' => Money::round($surcharge),
-            'net_salary' => Money::round($net),
+        ];
+
+        $persistedNet = Money::d($persisted['gross_salary'])
+            ->minus($persisted['unpaid_absence_deduction'])
+            ->plus($persisted['overtime_pay'])
+            ->plus($persisted['earnings_total'])
+            ->plus($persisted['adjustment_earnings_total'])
+            ->minus($persisted['deductions_total'])
+            ->minus($persisted['adjustment_deductions_total'])
+            ->minus($persisted['loan_deductions_total'])
+            ->minus($persisted['ssc_employee'])
+            ->minus($persisted['income_tax'])
+            ->minus($persisted['surcharge']);
+        $persisted['net_salary'] = Money::round($persistedNet);
+
+        $persistedEarnedBase = Money::d($persisted['gross_salary'])
+            ->minus($persisted['unpaid_absence_deduction']);
+        if ($persistedEarnedBase->isLessThan(0)) {
+            $persistedEarnedBase = BigDecimal::zero();
+        }
+
+        return $persisted + [
             'compliance_setting_id' => $record->id,
             'loan_repayments' => $loans['details'],
             'adjustments' => $adjustments['details'],
@@ -126,18 +148,19 @@ class PayrollEngine
                 'setting_version' => $record->version_label,
                 'effective_date' => $record->effective_date->toDateString(),
                 'settings' => $settings,
+                'rounding_policy' => 'net_from_persisted_components_3dp',
                 'salary_proration' => $proration,
-                'earned_base_salary' => Money::round($earnedBase),
-                'unpaid_absence_deduction' => Money::round($absence['total']),
+                'earned_base_salary' => Money::round($persistedEarnedBase),
+                'unpaid_absence_deduction' => $persisted['unpaid_absence_deduction'],
                 'unpaid_absence_details' => $absence['details'],
-                'earnings_total' => Money::round($earnings['total']),
+                'earnings_total' => $persisted['earnings_total'],
                 'earnings_details' => $earnings['details'],
-                'adjustment_earnings_total' => Money::round($adjustments['earning_total']),
-                'adjustment_deductions_total' => Money::round($adjustments['deduction_total']),
+                'adjustment_earnings_total' => $persisted['adjustment_earnings_total'],
+                'adjustment_deductions_total' => $persisted['adjustment_deductions_total'],
                 'payroll_adjustments' => $adjustments['details'],
-                'deductions_total' => Money::round($deductions['total']),
+                'deductions_total' => $persisted['deductions_total'],
                 'deduction_details' => $deductions['details'],
-                'loan_deductions_total' => Money::round($loans['total']),
+                'loan_deductions_total' => $persisted['loan_deductions_total'],
                 'loan_repayment_details' => $loans['details'],
                 'ssc_ceiling_used' => Money::round($ssc['ceiling']),
                 'ssc_base' => Money::round($ssc['base']),
@@ -152,50 +175,105 @@ class PayrollEngine
     private function earningsForPeriod(Employee $employee, Carbon $start, Carbon $end): array
     {
         $rows = EmployeeEarning::where('employee_id', $employee->id)->applicableTo($start, $end)->get();
-        $total = BigDecimal::zero(); $taxable = BigDecimal::zero(); $ssc = BigDecimal::zero(); $details = [];
+        $total = BigDecimal::zero();
+        $taxable = BigDecimal::zero();
+        $ssc = BigDecimal::zero();
+        $details = [];
         foreach ($rows as $row) {
-            $amount = Money::d($row->amount); $total = $total->plus($amount);
-            if ($row->taxable) $taxable = $taxable->plus($amount);
-            if ($row->ssc_applicable) $ssc = $ssc->plus($amount);
-            $details[] = ['earning_id'=>$row->id,'category'=>$row->category,'name'=>$row->name,'amount_jod'=>Money::round($amount),'taxable'=>$row->taxable,'ssc_applicable'=>$row->ssc_applicable,'recurring'=>$row->recurring];
+            $amount = Money::d($row->amount);
+            $total = $total->plus($amount);
+            if ($row->taxable) {
+                $taxable = $taxable->plus($amount);
+            }
+            if ($row->ssc_applicable) {
+                $ssc = $ssc->plus($amount);
+            }
+            $details[] = [
+                'earning_id' => $row->id,
+                'category' => $row->category,
+                'name' => $row->name,
+                'amount_jod' => Money::round($amount),
+                'taxable' => $row->taxable,
+                'ssc_applicable' => $row->ssc_applicable,
+                'recurring' => $row->recurring,
+            ];
         }
-        return ['total'=>$total,'taxable'=>$taxable,'ssc_applicable'=>$ssc,'details'=>$details];
+
+        return ['total' => $total, 'taxable' => $taxable, 'ssc_applicable' => $ssc, 'details' => $details];
     }
 
     private function deductionsForPeriod(Employee $employee, Carbon $start, Carbon $end): array
     {
         $rows = EmployeeDeduction::where('employee_id', $employee->id)->applicableTo($start, $end)->get();
-        $total = BigDecimal::zero(); $taxable = BigDecimal::zero(); $ssc = BigDecimal::zero(); $details = [];
+        $total = BigDecimal::zero();
+        $taxable = BigDecimal::zero();
+        $ssc = BigDecimal::zero();
+        $details = [];
         foreach ($rows as $row) {
-            $amount = Money::d($row->amount); $total = $total->plus($amount);
-            if ($row->reduces_taxable_income) $taxable = $taxable->plus($amount);
-            if ($row->reduces_ssc_base) $ssc = $ssc->plus($amount);
-            $details[] = ['deduction_id'=>$row->id,'category'=>$row->category,'name'=>$row->name,'amount_jod'=>Money::round($amount),'reduces_taxable_income'=>$row->reduces_taxable_income,'reduces_ssc_base'=>$row->reduces_ssc_base,'recurring'=>$row->recurring];
+            $amount = Money::d($row->amount);
+            $total = $total->plus($amount);
+            if ($row->reduces_taxable_income) {
+                $taxable = $taxable->plus($amount);
+            }
+            if ($row->reduces_ssc_base) {
+                $ssc = $ssc->plus($amount);
+            }
+            $details[] = [
+                'deduction_id' => $row->id,
+                'category' => $row->category,
+                'name' => $row->name,
+                'amount_jod' => Money::round($amount),
+                'reduces_taxable_income' => $row->reduces_taxable_income,
+                'reduces_ssc_base' => $row->reduces_ssc_base,
+                'recurring' => $row->recurring,
+            ];
         }
-        return ['total'=>$total,'taxable_reduction'=>$taxable,'ssc_base_reduction'=>$ssc,'details'=>$details];
+
+        return ['total' => $total, 'taxable_reduction' => $taxable, 'ssc_base_reduction' => $ssc, 'details' => $details];
     }
 
     private function overtimePay(Employee $employee, int $month, int $year): array
     {
-        $rows = OvertimeEntry::where('employee_id', $employee->id)->where('status', 'approved')
-            ->whereYear('date', $year)->whereMonth('date', $month)->orderBy('date')->get();
-        $total = BigDecimal::zero(); $details = []; $cache = [];
+        $rows = OvertimeEntry::where('employee_id', $employee->id)
+            ->where('status', 'approved')
+            ->whereYear('date', $year)
+            ->whereMonth('date', $month)
+            ->orderBy('date')
+            ->get();
+        $total = BigDecimal::zero();
+        $details = [];
+        $cache = [];
         foreach ($rows as $row) {
             $dateKey = $row->date->toDateString();
             if (! isset($cache[$dateKey])) {
                 $compliance = $this->compliance->forDate($row->date);
-                $this->compliance->require($compliance->settings, ['monthly_hours_divisor','overtime_multiplier_standard','overtime_multiplier_rest_holiday']);
+                $this->compliance->require($compliance->settings, ['monthly_hours_divisor', 'overtime_multiplier_standard', 'overtime_multiplier_rest_holiday']);
                 $cache[$dateKey] = $compliance;
             }
-            $compliance = $cache[$dateKey]; $settings = $compliance->settings;
+            $compliance = $cache[$dateKey];
+            $settings = $compliance->settings;
             $divisor = Money::d((string) $settings['monthly_hours_divisor']);
-            if ($divisor->isLessThanOrEqualTo(0)) throw new RuntimeException('monthly_hours_divisor must be greater than zero.');
+            if ($divisor->isLessThanOrEqualTo(0)) {
+                throw new RuntimeException('monthly_hours_divisor must be greater than zero.');
+            }
             $salary = $this->salaries->salaryAt($employee, $row->date);
             $hourly = $salary->dividedBy($divisor, 12, RoundingMode::HALF_UP);
             $multiplier = (string) $settings[$row->rate_type === 'rest_holiday' ? 'overtime_multiplier_rest_holiday' : 'overtime_multiplier_standard'];
-            $pay = $hourly->multipliedBy((string) $row->hours)->multipliedBy($multiplier); $total = $total->plus($pay);
-            $details[] = ['entry_id'=>$row->id,'date'=>$dateKey,'hours'=>(string)$row->hours,'rate_type'=>$row->rate_type,'monthly_salary_jod'=>Money::round($salary),'multiplier'=>$multiplier,'monthly_hours_divisor'=>(string)$settings['monthly_hours_divisor'],'settings_version'=>$compliance->version_label,'amount_jod'=>Money::round($pay)];
+            $pay = $hourly->multipliedBy((string) $row->hours)->multipliedBy($multiplier);
+            $total = $total->plus($pay);
+            $details[] = [
+                'entry_id' => $row->id,
+                'date' => $dateKey,
+                'hours' => (string) $row->hours,
+                'rate_type' => $row->rate_type,
+                'monthly_salary_jod' => Money::round($salary),
+                'multiplier' => $multiplier,
+                'monthly_hours_divisor' => (string) $settings['monthly_hours_divisor'],
+                'settings_version' => $compliance->version_label,
+                'amount_jod' => Money::round($pay),
+            ];
         }
-        return ['total'=>$total,'details'=>$details];
+
+        return ['total' => $total, 'details' => $details];
     }
 }
